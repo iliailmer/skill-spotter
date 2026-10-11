@@ -3,6 +3,8 @@ name = "skill-spotter"
 version = "0.1.0"
 description = "Detect repeated requests in Claude Code history and suggest skills"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = []
 
 [project.scripts]

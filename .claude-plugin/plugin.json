@@ -1,0 +1,6 @@
+{
+  "name": "skill-spotter",
+  "version": "0.1.0",
+  "description": "Notices repeated requests across sessions and suggests a skill",
+  "hooks": "./hooks/hooks.json"
+}

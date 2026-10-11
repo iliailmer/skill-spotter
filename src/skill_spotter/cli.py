@@ -1,35 +1,16 @@
 import json
 import os
 import re
-import subprocess
 import sys
-from pathlib import Path
 
-from . import paths, state
+from . import paths, state, targets
 from .gate import find_matches, topic_key
 from .index import Index
 from .judge import judge
 from .transcripts import clean_prompt
 
 NAME = re.compile(r"^[a-z0-9]+(-[a-z0-9]+){0,2}$")
-
-
-def chezmoi_source() -> Path:
-    try:
-        out = subprocess.run(["chezmoi", "source-path"], capture_output=True, text=True, timeout=10)
-        if out.returncode == 0 and out.stdout.strip():
-            return Path(out.stdout.strip())
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return Path("~/.local/share/chezmoi").expanduser()
-
-
-def existing_skills() -> list[str]:
-    names = set()
-    for base in (Path("~/.claude/skills").expanduser(), chezmoi_source() / "dot_claude" / "skills"):
-        if base.is_dir():
-            names.update(p.name for p in base.iterdir() if p.is_dir())
-    return sorted(names)
+LABEL = {"skill": "skill", "rule": "line for your instructions file", "hook": "hook idea", "alias": "shell alias"}
 
 
 def cmd_check() -> None:
@@ -48,19 +29,19 @@ def cmd_check() -> None:
     if state.on_cooldown(key):
         state.log_decision(stage="cooldown", key=key)
         return
-    verdict = judge(prompt, matches, existing_skills())
+    pending = state.load_pending()
+    taken = targets.existing_skills() + [p["name"] for p in pending]
+    verdict = judge(prompt, matches, taken, targets.read_rules())
     state.log_decision(
         stage="judged", key=key, prompt=prompt, matches=[m.text for m in matches], verdict=verdict
     )
-    if not verdict or not (verdict["same_task"] and verdict["skill_opportunity"]):
+    if not verdict or not verdict["repeat"] or verdict["kind"] not in LABEL:
         return
-    if not NAME.match(verdict["name"]) or verdict["name"] in existing_skills():
-        return
-    pending = state.load_pending()
-    if any(p["name"] == verdict["name"] for p in pending):
+    if not NAME.match(verdict["name"]) or verdict["name"] in taken or not verdict["body"].strip():
         return
     pending.append(
         {
+            "kind": verdict["kind"],
             "name": verdict["name"],
             "description": verdict["description"],
             "body": verdict["body"],
@@ -70,7 +51,7 @@ def cmd_check() -> None:
         }
     )
     state.save_pending(pending)
-    state.log_decision(stage="suggested", key=key, name=verdict["name"])
+    state.log_decision(stage="suggested", key=key, name=verdict["name"], kind=verdict["kind"])
 
 
 def cmd_show() -> None:
@@ -84,8 +65,8 @@ def cmd_show() -> None:
     p["shown"] = True
     state.save_pending(pending)
     msg = (
-        f"skill-spotter: you asked something like this in {len(p['matches']) + 1} sessions "
-        f'(e.g. "{p["matches"][0][:90]}"). Suggested skill `{p["name"]}`: {p["description"]} '
+        f"skill-spotter: you said something like this in {len(p['matches']) + 1} sessions "
+        f'(e.g. "{p["matches"][0][:90]}"). Suggested {LABEL[p["kind"]]} `{p["name"]}`: {p["description"]} '
         f"Save it: `skill-spotter accept {p['name']}`. Skip it: `skill-spotter dismiss {p['name']}`."
     )
     print(json.dumps({"systemMessage": msg}))
@@ -94,26 +75,54 @@ def cmd_show() -> None:
 def cmd_status() -> None:
     pending = state.load_pending()
     if pending:
-        print(f"skill idea: {pending[0]['name']}")
+        print(f"idea: {pending[0]['name']}")
 
 
 def cmd_list() -> None:
     for p in state.load_pending():
-        print(f"{p['name']}: {p['description']}")
+        print(f"[{p['kind']}] {p['name']}: {p['description']}\n    {p['body'].strip().splitlines()[0][:100]}")
+
+
+def write_skill(item: dict) -> str:
+    target = targets.skills_dir() / item["name"] / "SKILL.md"
+    if target.exists():
+        sys.exit(f"{target} already exists")
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        f"---\nname: {item['name']}\ndescription: {item['description']}\n---\n\n{item['body'].strip()}\n"
+    )
+    return f"wrote {target}"
+
+
+def write_rule(item: dict) -> str:
+    target = targets.rules_file()
+    text = target.read_text() if target.exists() else ""
+    heading = "## Added by skill-spotter"
+    line = f"- {item['body'].strip()}\n"
+    if heading in text:
+        text = text.rstrip("\n") + "\n" + line
+    else:
+        text = text.rstrip("\n") + f"\n\n{heading}\n\n" + line
+    target.write_text(text)
+    return f"appended a line to {target} under '{heading}'. Move it where it fits."
+
+
+def write_note(item: dict) -> str:
+    target = paths.home() / "accepted-ideas.md"
+    with target.open("a") as fh:
+        fh.write(f"## {item['kind']}: {item['name']}\n\n{item['description']}\n\n{item['body'].strip()}\n\n")
+    return f"saved to {target}\n\n{item['body'].strip()}"
 
 
 def cmd_accept(name: str) -> None:
     pending = state.load_pending()
     item = next((p for p in pending if p["name"] == name), None)
     if not item:
-        sys.exit(f"no pending skill named {name}")
-    target = chezmoi_source() / "dot_claude" / "skills" / name / "SKILL.md"
-    if target.exists():
-        sys.exit(f"{target} already exists")
-    target.parent.mkdir(parents=True)
-    target.write_text(f"---\nname: {name}\ndescription: {item['description']}\n---\n\n{item['body'].strip()}\n")
+        sys.exit(f"no pending idea named {name}")
+    writer = {"skill": write_skill, "rule": write_rule}.get(item["kind"], write_note)
+    print(writer(item))
     state.save_pending([p for p in pending if p["name"] != name])
-    print(f"wrote {target}\nReview it, then: chezmoi apply ~/.claude/skills/{name}\nNothing is committed.")
+    print("Nothing is applied or committed. Review the change first.")
 
 
 def cmd_dismiss(name: str) -> None:

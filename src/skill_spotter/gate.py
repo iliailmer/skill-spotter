@@ -1,7 +1,7 @@
 from .index import Index, Match, tokens
 
 MIN_TOKENS = 4
-MIN_JACCARD = 0.35
+MIN_JACCARD = 0.2
 MIN_SESSIONS = 2
 
 
