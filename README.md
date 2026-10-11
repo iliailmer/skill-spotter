@@ -28,7 +28,13 @@ Accepting never applies or commits anything:
 
 ## Install
 
-    git clone <this repo> && claude --plugin-dir ./skill-spotter
+In Claude Code:
+
+    /plugin install skill-spotter --marketplace iliailmer/skill-spotter
+
+To try it from a clone without installing:
+
+    git clone https://github.com/iliailmer/skill-spotter && claude --plugin-dir ./skill-spotter
 
 Put `bin/skill-spotter` on your PATH to run the commands below. Python 3.11+, no
 dependencies.

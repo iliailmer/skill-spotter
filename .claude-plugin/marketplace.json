@@ -1,0 +1,11 @@
+{
+  "name": "skill-spotter",
+  "owner": { "name": "Ilia Ilmer" },
+  "plugins": [
+    {
+      "name": "skill-spotter",
+      "source": "./",
+      "description": "Notices repeated requests across sessions and suggests a skill, rule, hook or alias"
+    }
+  ]
+}
